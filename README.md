@@ -1,0 +1,3 @@
+This is the code for a FastAPI/Vue/TypeScript website running on the raspberry pi 3B that gets the information from a DFRobotics Gravity Lightning distance sensor. The webiste display the distance of lighting from the current location within a 40km range. It will also give an overview of recently detected strikes (amount, intensity and distance). Whenever a strike is detected this will be stored in a postgresql database with all available information.
+
+Additionally, the webapp connects to a 1.14inch Waveshare display (which is also connected to the raspberrypi) and shows the 3 most recent strikes with distance, date, time and intensity. This display will only be on between 8 and 20.
