@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#0a0d14"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+
+    <linearGradient id="boltGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a5f3fc"/>
+      <stop offset="40%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="100%" stop-color="#eab308"/>
+    </linearGradient>
+
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+  <rect width="504" height="504" x="4" y="4" rx="108" fill="none" stroke="#1e293b" stroke-width="4"/>
+
+  <!-- Radar Concentric Rings -->
+  <circle cx="256" cy="256" r="190" fill="none" stroke="#06b6d4" stroke-width="2" stroke-opacity="0.2"/>
+  <circle cx="256" cy="256" r="130" fill="none" stroke="#06b6d4" stroke-width="2" stroke-opacity="0.3" stroke-dasharray="6 6"/>
+  <circle cx="256" cy="256" r="70" stroke="#06b6d4" stroke-width="2" stroke-opacity="0.4" fill="none"/>
+
+  <!-- Radar Crosshairs -->
+  <line x1="256" y1="56" x2="256" y2="456" stroke="#06b6d4" stroke-width="2" stroke-opacity="0.2"/>
+  <line x1="56" y1="256" x2="456" y2="256" stroke="#06b6d4" stroke-width="2" stroke-opacity="0.2"/>
+
+  <!-- Glowing Lightning Bolt -->
+  <g filter="url(#glow)">
+    <path d="M 280 90 L 160 270 H 250 L 220 422 L 360 230 H 270 Z" fill="url(#boltGrad)" />
+    <path d="M 285 105 L 180 260 H 255 L 235 390 L 340 240 H 265 Z" fill="url(#accentGrad)" opacity="0.9" />
+  </g>
+
+  <!-- Pulsing Target Pulse Dot -->
+  <circle cx="340" cy="170" r="12" fill="#ef4444"/>
+  <circle cx="340" cy="170" r="24" fill="none" stroke="#ef4444" stroke-width="3" stroke-opacity="0.6"/>
+</svg>

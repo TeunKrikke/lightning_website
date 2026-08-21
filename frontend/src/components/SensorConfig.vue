@@ -92,11 +92,14 @@
           </div>
         </div>
 
-        <div style="display: flex; gap: 12px; margin-top: 8px;">
+        <div style="display: flex; gap: 12px; margin-top: 8px; align-items: center; flex-wrap: wrap;">
           <button type="submit" class="btn-primary" :disabled="saving">
             {{ saving ? 'Saving Changes...' : 'Save Configuration' }}
           </button>
-          <span v-if="saveSuccess" class="status-msg success">✓ Calibration updated successfully</span>
+          <span v-if="saveSuccess && !offlineNotice" class="status-msg success">✓ Calibration updated successfully</span>
+          <span v-if="saveSuccess && offlineNotice" class="status-msg warning" style="color: var(--color-gold);">
+            ⚡ Offline Mode: Changes saved locally & will sync when reconnected
+          </span>
         </div>
       </form>
     </div>
@@ -170,6 +173,7 @@
 
 <script lang="ts">
 import { defineComponent, ref, onMounted } from 'vue';
+import { offlineSync } from '../services/offlineSync';
 
 interface SensorConfig {
   capacitance: number;
@@ -208,6 +212,7 @@ export default defineComponent({
 
     const saving = ref(false);
     const saveSuccess = ref(false);
+    const offlineNotice = ref(false);
     const testing = ref(false);
     const testResult = ref<{ success: boolean; message: string } | null>(null);
 
@@ -218,16 +223,24 @@ export default defineComponent({
       try {
         const res = await fetch('/api/sensor/status');
         if (res.ok) {
-          config.value = await res.json();
+          const data = await res.json();
+          config.value = data;
+          offlineSync.saveCache('config', data);
+        } else {
+          const cached = offlineSync.getCache<SensorConfig>('config');
+          if (cached) config.value = cached;
         }
       } catch (err) {
-        console.error('Failed to fetch sensor configuration:', err);
+        console.warn('Network offline while fetching config, using cache:', err);
+        const cached = offlineSync.getCache<SensorConfig>('config');
+        if (cached) config.value = cached;
       }
     };
 
     const saveSettings = async () => {
       saving.value = true;
       saveSuccess.value = false;
+      offlineNotice.value = false;
       try {
         const res = await fetch('/api/sensor/config', {
           method: 'POST',
@@ -236,17 +249,30 @@ export default defineComponent({
           },
           body: JSON.stringify(config.value)
         });
-        if (res.ok) {
-          config.value = await res.json();
+        
+        const data = await res.json();
+        if (res.ok && !data.offlineQueued) {
+          config.value = data;
+          offlineSync.saveCache('config', data);
           saveSuccess.value = true;
-          setTimeout(() => {
-            saveSuccess.value = false;
-          }, 4000);
+        } else {
+          // Response indicated offline interception or partial server response
+          offlineSync.enqueueAction('Update Calibration Settings', '/api/sensor/config', config.value);
+          offlineSync.saveCache('config', config.value);
+          saveSuccess.value = true;
+          offlineNotice.value = true;
         }
       } catch (err) {
-        console.error('Failed to save sensor settings:', err);
+        console.warn('Offline network error saving settings, enqueueing:', err);
+        offlineSync.enqueueAction('Update Calibration Settings', '/api/sensor/config', config.value);
+        offlineSync.saveCache('config', config.value);
+        saveSuccess.value = true;
+        offlineNotice.value = true;
       } finally {
         saving.value = false;
+        setTimeout(() => {
+          saveSuccess.value = false;
+        }, 5000);
       }
     };
 
@@ -285,6 +311,7 @@ export default defineComponent({
       capacitanceOptions,
       saving,
       saveSuccess,
+      offlineNotice,
       testing,
       testResult,
       saveSettings,

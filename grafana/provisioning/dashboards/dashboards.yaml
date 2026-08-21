@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: 'Lightning Tracker Dashboards'
+    orgId: 1
+    folder: 'Lightning Tracker'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

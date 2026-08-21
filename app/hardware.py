@@ -44,6 +44,7 @@ class MockAS3935Sensor:
         self._mock_interrupt_src = 0
         self._mock_distance = 0
         self._mock_intensity = 0
+        self.mock_i2c_failure = False
 
     def reset(self):
         logger.info("Mock AS3935: Resetting sensor.")
@@ -164,6 +165,109 @@ class AS3935SensorWrapper:
         # Forward calls to the underlying physical/mock sensor
         return getattr(self._sensor, name)
 
+    def read_register(self, register: int) -> int:
+        if IS_MOCK_AS3935 or isinstance(self._sensor, MockAS3935Sensor):
+            if getattr(self._sensor, "mock_i2c_failure", False):
+                raise OSError("[Errno 121] Remote I/O error (Simulated I2C Failure)")
+            
+            # Map mock register queries to internal properties
+            if register == 0x00:
+                return 0x24 if self._sensor.indoors else 0x1C
+            elif register == 0x01:
+                return (self._sensor.noise_floor << 4) | self._sensor.watchdog
+            elif register == 0x02:
+                # Include CL_STAT (bit 6) set to high as it is in library clear_statistics
+                return 0x40 | self._sensor.spike_rejection
+            elif register == 0x03:
+                return 0x20 if not self._sensor.disturber_enabled else 0x00
+            elif register == 0x08:
+                return self._sensor.capacitance >> 3
+            return 0
+        
+        # Physical read
+        self._sensor.sing_reg_read(register)
+        if not hasattr(self._sensor, 'register') or not self._sensor.register:
+            raise OSError(f"Failed to read from register {hex(register)}")
+        return self._sensor.register[0]
+
+    def get_diagnostics(self, db_config: dict) -> dict:
+        report = {
+            "is_mock": IS_MOCK_AS3935 or isinstance(self._sensor, MockAS3935Sensor),
+            "i2c_connected": False,
+            "error_message": None,
+            "capacitance_read": None,
+            "capacitance_config": db_config["capacitance"],
+            "capacitance_match": False,
+            "location_read": None,
+            "location_config": "Indoor" if db_config["location"] == 0 else "Outdoor",
+            "location_match": False,
+            "disturber_read": None,
+            "disturber_config": "Enabled" if db_config["disturber"] == 1 else "Disabled (Masked)",
+            "disturber_match": False,
+            "noise_floor_read": None,
+            "noise_floor_config": db_config["noise_floor"],
+            "noise_floor_match": False,
+            "watchdog_read": None,
+            "watchdog_config": db_config["watchdog"],
+            "watchdog_match": False,
+            "spike_rejection_read": None,
+            "spike_rejection_config": db_config["spike_rejection"],
+            "spike_rejection_match": False
+        }
+
+        try:
+            reg00 = self.read_register(0x00)
+            reg01 = self.read_register(0x01)
+            reg02 = self.read_register(0x02)
+            reg03 = self.read_register(0x03)
+            reg08 = self.read_register(0x08)
+
+            report["i2c_connected"] = True
+
+            # Capacitance (bits 3:0 of 0x08, step size = 8pF)
+            cap_val = (reg08 & 0x0F) * 8
+            report["capacitance_read"] = cap_val
+            report["capacitance_match"] = (cap_val == db_config["capacitance"])
+
+            # Location (AFE Gain: bits 5:1 of 0x00)
+            # 0x24 = Indoor (Gain 18), 0x1C = Outdoor (Gain 14)
+            afe_gain = (reg00 & 0x3E)
+            loc_str = "Unknown"
+            if afe_gain == 0x24:
+                loc_str = "Indoor"
+            elif afe_gain == 0x1C:
+                loc_str = "Outdoor"
+            report["location_read"] = loc_str
+            report["location_match"] = (loc_str == report["location_config"])
+
+            # Disturber Masking (bit 5 of 0x03)
+            # 0x20 = Masked (Disabled), 0x00 = Enabled
+            dist_mask = (reg03 & 0x20)
+            dist_str = "Disabled (Masked)" if dist_mask == 0x20 else "Enabled"
+            report["disturber_read"] = dist_str
+            report["disturber_match"] = (dist_str == report["disturber_config"])
+
+            # Noise Floor (bits 6:4 of 0x01)
+            nf_val = (reg01 & 0x70) >> 4
+            report["noise_floor_read"] = nf_val
+            report["noise_floor_match"] = (nf_val == db_config["noise_floor"])
+
+            # Watchdog (bits 3:0 of 0x01)
+            wd_val = reg01 & 0x0F
+            report["watchdog_read"] = wd_val
+            report["watchdog_match"] = (wd_val == db_config["watchdog"])
+
+            # Spike Rejection (bits 3:0 of 0x02)
+            sr_val = reg02 & 0x0F
+            report["spike_rejection_read"] = sr_val
+            report["spike_rejection_match"] = (sr_val == db_config["spike_rejection"])
+
+        except Exception as e:
+            report["i2c_connected"] = False
+            report["error_message"] = str(e)
+
+        return report
+
 
 class WaveshareDisplayWrapper:
     def __init__(self):
@@ -183,7 +287,7 @@ class WaveshareDisplayWrapper:
 
 # Interrupt Handling Utility
 class GPIOInterruptManager:
-    def __init__(self, irq_pin=7):
+    def __init__(self, irq_pin=4):
         self.irq_pin = irq_pin
         self.callback = None
 
@@ -191,10 +295,10 @@ class GPIOInterruptManager:
         self.callback = callback
         if GPIO is not None:
             try:
-                GPIO.setmode(GPIO.BOARD)
+                GPIO.setmode(GPIO.BCM)
                 GPIO.setup(self.irq_pin, GPIO.IN)
                 GPIO.add_event_detect(self.irq_pin, GPIO.RISING, callback=self._gpio_callback)
-                logger.info(f"GPIO interrupt configured on physical BOARD pin {self.irq_pin}.")
+                logger.info(f"GPIO interrupt configured on physical BCM pin {self.irq_pin}.")
             except Exception as e:
                 logger.error(f"Failed to setup physical GPIO interrupt: {e}. Running in simulation only.")
         else:

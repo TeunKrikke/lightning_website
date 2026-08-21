@@ -8,7 +8,8 @@ from sqlalchemy import func
 from app.database import get_db, Strike, get_config_val, set_config_val
 from app.schemas import (
     StrikeResponse, StatsResponse, SensorConfigResponse, 
-    SensorConfigUpdate, StrikeCreate, TelegramTestRequest
+    SensorConfigUpdate, StrikeCreate, TelegramTestRequest,
+    DiagnosticResponse, ToggleMockErrorRequest
 )
 from app.hardware import sensor_hardware, gpio_manager, IS_MOCK_AS3935, IS_MOCK_LCD
 from app.websocket import manager as ws_manager
@@ -201,3 +202,109 @@ async def test_telegram(payload: TelegramTestRequest):
         return {"status": "success", "message": "Test message sent successfully!"}
     else:
         raise HTTPException(status_code=400, detail="Failed to send Telegram test message. Check token and chat ID.")
+
+@router.get("/sensor/diagnostics", response_model=DiagnosticResponse)
+def get_sensor_diagnostics(db: Session = Depends(get_db)):
+    """
+    Query the AS3935 sensor hardware registers and run diagnostics.
+    """
+    try:
+        # Load the configuration targets from database
+        db_config = {
+            "capacitance": int(get_config_val(db, "capacitance", "96")),
+            "location": int(get_config_val(db, "location", "0")),
+            "disturber": int(get_config_val(db, "disturber", "1")),
+            "noise_floor": int(get_config_val(db, "noise_floor", "2")),
+            "watchdog": int(get_config_val(db, "watchdog", "2")),
+            "spike_rejection": int(get_config_val(db, "spike_rejection", "2"))
+        }
+
+        # Run checks on hardware wrapper
+        diag_data = sensor_hardware.get_diagnostics(db_config)
+
+        # Evaluate health status
+        status = "healthy"
+        message = "AS3935 sensor communication is active and properly calibrated."
+        recommendations = []
+
+        if not diag_data["i2c_connected"]:
+            status = "error"
+            message = f"Sensor communication failure: {diag_data['error_message'] or 'Cannot read registers'}"
+            recommendations.extend([
+                "Check physical I2C wiring: ensure SDA/SCL, VCC (3.3V/5V), and GND are securely connected.",
+                "Verify I2C interface is enabled on the Raspberry Pi (run 'ls /dev/i2c*' or check interface settings in raspi-config).",
+                "Ensure I2C pull-up resistors are installed (usually built into the DFRobot Gravity breakout board).",
+                "Verify the configured sensor address (default 0x03) matches your sensor board's hardware address solder-bridges.",
+                "Run 'sudo i2cdetect -y 1' in the Pi terminal to verify if the chip appears on the bus."
+            ])
+        elif diag_data["is_mock"]:
+            status = "warning"
+            message = "System is running in simulation mode. Hardware drivers could not be loaded."
+            recommendations.extend([
+                "Ensure the application is running directly on the Raspberry Pi host hardware.",
+                "Run the installation shell script './setup.sh' to compile and install all required native dependencies.",
+                "Check system logs to see why physical libraries failed to load."
+            ])
+        else:
+            # Check for matches
+            mismatches = []
+            if not diag_data["capacitance_match"]:
+                mismatches.append(f"Capacitance ({diag_data['capacitance_read']}pF read vs {db_config['capacitance']}pF configured)")
+            if not diag_data["location_match"]:
+                mismatches.append(f"Environment Mode ({diag_data['location_read']} read vs {db_config['location']} configured)")
+            if not diag_data["disturber_match"]:
+                mismatches.append(f"Disturber Mask ({diag_data['disturber_read']} read)")
+            if not diag_data["noise_floor_match"]:
+                mismatches.append(f"Noise Floor ({diag_data['noise_floor_read']} read vs {db_config['noise_floor']} configured)")
+            if not diag_data["watchdog_match"]:
+                mismatches.append(f"Watchdog Threshold ({diag_data['watchdog_read']} read vs {db_config['watchdog']} configured)")
+            if not diag_data["spike_rejection_match"]:
+                mismatches.append(f"Spike Rejection ({diag_data['spike_rejection_read']} read vs {db_config['spike_rejection']} configured)")
+
+            if mismatches:
+                status = "warning"
+                message = f"Configuration mismatch detected for: {', '.join(mismatches)}."
+                recommendations.extend([
+                    "Navigate to the Calibration Console tab and hit 'Save Configuration' to force-rewrite register values.",
+                    "Verify power supply stability: voltage fluctuations on the 3.3V rail can cause register write corruption."
+                ])
+            else:
+                # Connected and matching, but user complained they aren't seeing lightnings.
+                # Provide advanced calibration/tuning hints.
+                recommendations.extend([
+                    "Verify antenna tuning: The AS3935 requires its LC circuit to be tuned precisely to 500kHz (±3.5%). The default is 96pF, but component tolerances may require selecting another value.",
+                    "Verify the IRQ pin connection: Check if the BCM 4 (Pin 7) is wired securely. The Pi cannot receive strike detection alerts if the IRQ interrupt link is broken.",
+                    "High noise floor levels: If your environment has excessive electromagnetic interference (EMI) from routers or appliances, the sensor might trigger noise/disturber interrupts instead of lightning strikes. Try relocating the sensor.",
+                    "Verify the hardware detection pipeline: Press the 'Simulate Strike' button on the Dashboard tab to inject a test interrupt and verify the server database + frontend refresh chain."
+                ])
+
+        return {
+            "status": status,
+            "message": message,
+            "details": diag_data,
+            "recommendations": recommendations
+        }
+    except Exception as e:
+        logger.error(f"Error compiling diagnostics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/sensor/diagnostics/toggle-mock-error")
+def toggle_mock_diagnostics_error(payload: ToggleMockErrorRequest):
+    """
+    Allow developers to toggle I2C failures on the mock sensor to test UI error behaviors.
+    """
+    try:
+        # Check if physical or mock
+        sensor_obj = sensor_hardware._sensor
+        if hasattr(sensor_obj, "mock_i2c_failure"):
+            sensor_obj.mock_i2c_failure = payload.enable_error
+            return {
+                "status": "success",
+                "mock_i2c_failure": sensor_obj.mock_i2c_failure,
+                "message": f"Mock I2C failure set to {sensor_obj.mock_i2c_failure}"
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Cannot toggle mock error on physical hardware.")
+    except Exception as e:
+        logger.error(f"Failed to toggle mock error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

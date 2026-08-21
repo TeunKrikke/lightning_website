@@ -54,52 +54,70 @@
         <span v-if="!simulating">⚡ Inject Simulated Strike</span>
         <span v-else>Processing Strike...</span>
       </button>
-      <span v-if="simSuccess" class="success-indicator">✓ Strike successfully processed</span>
+      <span v-if="simSuccess && !offlineQueuedMsg" class="success-indicator">✓ Strike successfully processed</span>
+      <span v-if="simSuccess && offlineQueuedMsg" class="success-indicator" style="color: var(--color-gold);">
+        ⚡ Offline: Strike queued locally & will sync when online
+      </span>
     </div>
   </div>
 </template>
 
 <script lang="ts">
 import { defineComponent, ref } from 'vue';
+import { offlineSync } from '../services/offlineSync';
 
 export default defineComponent({
   name: 'StrikeSimulator',
   emits: ['simulated'],
-  setup(props, { emit }) {
+  setup(_, { emit }) {
     const distance = ref(15);
     const intensity = ref(450);
     const simulating = ref(false);
     const simSuccess = ref(false);
+    const offlineQueuedMsg = ref(false);
 
     const triggerSimulation = async () => {
       simulating.value = true;
       simSuccess.value = false;
+      offlineQueuedMsg.value = false;
+      const payload = {
+        distance: distance.value,
+        intensity: intensity.value
+      };
+
       try {
         const res = await fetch('/api/strikes/simulate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
           },
-          body: JSON.stringify({
-            distance: distance.value,
-            intensity: intensity.value
-          })
+          body: JSON.stringify(payload)
         });
-        if (res.ok) {
+
+        const data = await res.json().catch(() => ({}));
+
+        if (res.ok && !data.offlineQueued) {
           simSuccess.value = true;
           emit('simulated');
-          setTimeout(() => {
-            simSuccess.value = false;
-          }, 3000);
         } else {
-          const data = await res.json();
-          alert(`Simulation error: ${data.detail || 'Failed'}`);
+          // Response indicated offline interception
+          offlineSync.enqueueAction('Simulate Strike', '/api/strikes/simulate', payload);
+          simSuccess.value = true;
+          offlineQueuedMsg.value = true;
+          emit('simulated');
         }
       } catch (err) {
-        console.error('Failed to trigger simulation:', err);
-        alert('Network connection error triggering simulation.');
+        console.warn('Network connection offline. Enqueueing strike simulation locally:', err);
+        offlineSync.enqueueAction('Simulate Strike', '/api/strikes/simulate', payload);
+        simSuccess.value = true;
+        offlineQueuedMsg.value = true;
+        emit('simulated');
       } finally {
         simulating.value = false;
+        setTimeout(() => {
+          simSuccess.value = false;
+          offlineQueuedMsg.value = false;
+        }, 4000);
       }
     };
 
@@ -108,6 +126,7 @@ export default defineComponent({
       intensity,
       simulating,
       simSuccess,
+      offlineQueuedMsg,
       triggerSimulation
     };
   }

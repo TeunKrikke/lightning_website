@@ -1,0 +1,26 @@
+{
+  "name": "RPi Lightning Tracking Station",
+  "short_name": "RPi Radar",
+  "description": "Raspberry Pi distance lightning tracking dashboard using DFRobot Gravity AS3935 sensor.",
+  "start_url": "/",
+  "id": "/",
+  "display": "standalone",
+  "background_color": "#0a0d14",
+  "theme_color": "#06b6d4",
+  "orientation": "any",
+  "categories": ["weather", "utilities", "tools"],
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

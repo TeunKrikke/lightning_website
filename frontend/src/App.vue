@@ -24,15 +24,41 @@
         >
           ⚙️ Calibration
         </button>
+        <button 
+          class="nav-btn" 
+          :class="{ active: currentTab === 'diagnostics' }"
+          @click="currentTab = 'diagnostics'"
+        >
+          🔍 Diagnostics
+        </button>
+
+        <!-- PWA Installation Action Button -->
+        <button 
+          v-if="isInstallable"
+          class="nav-btn pwa-install-btn" 
+          @click="installApp"
+        >
+          📲 Install Web App
+        </button>
+        <div v-else-if="isStandalone" class="pwa-installed-badge">
+          ⚡ App Installed
+        </div>
       </nav>
 
-      <div class="flex-col gap-sm" style="border-top: 1px solid var(--border-light); padding-top: 20px;">
-        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-sub);">
+      <div class="flex-col gap-xs" style="border-top: 1px solid var(--border-light); padding-top: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem;">
           <span 
-            style="width: 8px; height: 8px; border-radius: 50%;" 
-            :style="{ backgroundColor: wsConnected ? 'var(--color-green)' : 'var(--color-red)' }"
+            style="width: 8px; height: 8px; border-radius: 50%; transition: background-color 0.3s;" 
+            :style="{ backgroundColor: isSyncing ? 'var(--color-cyan)' : wsConnected ? 'var(--color-green)' : !isOnline ? 'var(--color-gold)' : 'var(--color-red)' }"
           ></span>
-          {{ wsConnected ? 'Live Connection Connected' : 'Connecting to Server...' }}
+          <span style="color: var(--text-sub); font-size: 0.8rem;">
+            {{ isSyncing ? 'Syncing Queue...' : wsConnected ? 'Live Connection Connected' : !isOnline ? `Offline (Cached${pendingSyncCount > 0 ? ` • ${pendingSyncCount} queued` : ''})` : 'Connecting to Server...' }}
+          </span>
+        </div>
+        <div v-if="pendingSyncCount > 0 && isOnline" style="margin-top: 6px;">
+          <button class="btn-secondary" style="padding: 4px 8px; font-size: 0.75rem; width: 100%; border-color: var(--color-cyan); color: var(--color-cyan);" @click="triggerSync">
+            🔄 Sync {{ pendingSyncCount }} Action{{ pendingSyncCount > 1 ? 's' : '' }}
+          </button>
         </div>
       </div>
     </aside>
@@ -55,10 +81,10 @@
       <header style="display: flex; justify-content: space-between; align-items: center;">
         <div>
           <h1 class="title-glowing" style="font-size: 2rem; margin-bottom: 4px;">
-            {{ currentTab === 'dashboard' ? 'Tracker Dashboard' : 'Calibration Console' }}
+            {{ currentTab === 'dashboard' ? 'Tracker Dashboard' : currentTab === 'settings' ? 'Calibration Console' : 'Sensor Diagnostics' }}
           </h1>
           <p style="color: var(--text-sub); font-size: 0.95rem;">
-            {{ currentTab === 'dashboard' ? 'Real-time observation within a 40km range' : 'AS3935 sensor and display configurations' }}
+            {{ currentTab === 'dashboard' ? 'Real-time observation within a 40km range' : currentTab === 'settings' ? 'AS3935 sensor and display configurations' : 'AS3935 hardware connection and register diagnostics' }}
           </p>
         </div>
         <div style="font-size: 0.9rem; text-align: right; color: var(--text-sub);">
@@ -82,6 +108,10 @@
       <div v-else-if="currentTab === 'settings'">
         <SensorConfig />
       </div>
+
+      <div v-else-if="currentTab === 'diagnostics'">
+        <SensorDiagnostics />
+      </div>
     </main>
   </div>
 </template>
@@ -93,6 +123,8 @@ import StatsCard from './components/StatsCard.vue';
 import StrikeHistory from './components/StrikeHistory.vue';
 import SensorConfig from './components/SensorConfig.vue';
 import StrikeSimulator from './components/StrikeSimulator.vue';
+import SensorDiagnostics from './components/SensorDiagnostics.vue';
+import { offlineSync } from './services/offlineSync';
 
 interface Strike {
   id: number;
@@ -123,7 +155,8 @@ export default defineComponent({
     StatsCard,
     StrikeHistory,
     SensorConfig,
-    StrikeSimulator
+    StrikeSimulator,
+    SensorDiagnostics
   },
   setup() {
     const currentTab = ref('dashboard');
@@ -140,10 +173,18 @@ export default defineComponent({
     const toast = ref<Toast | null>(null);
     let toastTimeout: number | null = null;
     
-    // WebSockets
+    // WebSockets & Network Connectivity
     const wsConnected = ref(false);
+    const isOnline = ref(navigator.onLine);
+    const pendingSyncCount = ref(offlineSync.getQueue().length);
+    const isSyncing = ref(false);
     let socket: WebSocket | null = null;
     let reconnectTimeout: number | null = null;
+
+    // PWA Install Prompt State
+    const deferredPrompt = ref<any>(null);
+    const isInstallable = ref(false);
+    const isStandalone = ref(window.matchMedia('(display-mode: standalone)').matches);
 
     // Time ticker
     const timeStr = ref('');
@@ -157,19 +198,74 @@ export default defineComponent({
       }, 6000);
     };
 
+    const installApp = async () => {
+      if (!deferredPrompt.value) return;
+      deferredPrompt.value.prompt();
+      const { outcome } = await deferredPrompt.value.userChoice;
+      console.log('[PWA Install] Outcome:', outcome);
+      deferredPrompt.value = null;
+      isInstallable.value = false;
+    };
+
+    const updateNetworkStatus = () => {
+      isOnline.value = navigator.onLine;
+      pendingSyncCount.value = offlineSync.getQueue().length;
+    };
+
+    const triggerSync = async () => {
+      if (!navigator.onLine) return;
+      const queue = offlineSync.getQueue();
+      if (queue.length === 0) return;
+
+      isSyncing.value = true;
+      const syncedCount = await offlineSync.syncPendingActions();
+      isSyncing.value = false;
+      pendingSyncCount.value = offlineSync.getQueue().length;
+
+      if (syncedCount > 0) {
+        showToast(
+          '⚡ Reconnected & Synced!',
+          `Successfully processed ${syncedCount} queued action(s) with the server.`,
+          'strike-toast',
+          '🔄'
+        );
+        fetchData();
+      }
+    };
+
     const fetchData = async () => {
+      // 1. Fetch Recent Strikes (with offline cache fallback)
       try {
         const strikesRes = await fetch('/api/strikes/recent?limit=30');
         if (strikesRes.ok) {
-          recentStrikes.value = await strikesRes.json();
-        }
-        
-        const statsRes = await fetch('/api/strikes/stats');
-        if (statsRes.ok) {
-          stats.value = await statsRes.json();
+          const data = await strikesRes.json();
+          recentStrikes.value = data;
+          offlineSync.saveCache('strikes', data);
+        } else {
+          const cached = offlineSync.getCache<Strike[]>('strikes');
+          if (cached) recentStrikes.value = cached;
         }
       } catch (err) {
-        console.error('Failed to fetch data from API:', err);
+        console.warn('Network offline fetching recent strikes, using cache:', err);
+        const cached = offlineSync.getCache<Strike[]>('strikes');
+        if (cached) recentStrikes.value = cached;
+      }
+
+      // 2. Fetch Stats (with offline cache fallback)
+      try {
+        const statsRes = await fetch('/api/strikes/stats');
+        if (statsRes.ok) {
+          const data = await statsRes.json();
+          stats.value = data;
+          offlineSync.saveCache('stats', data);
+        } else {
+          const cached = offlineSync.getCache<Stats>('stats');
+          if (cached) stats.value = cached;
+        }
+      } catch (err) {
+        console.warn('Network offline fetching stats, using cache:', err);
+        const cached = offlineSync.getCache<Stats>('stats');
+        if (cached) stats.value = cached;
       }
     };
 
@@ -184,6 +280,7 @@ export default defineComponent({
       socket.onopen = () => {
         wsConnected.value = true;
         console.log('WebSocket connection established.');
+        triggerSync();
       };
       
       socket.onmessage = (event) => {
@@ -192,6 +289,7 @@ export default defineComponent({
           const newStrike: Strike = msg.data;
           // Prepend new strike to list and limit to recent 30 items
           recentStrikes.value = [newStrike, ...recentStrikes.value].slice(0, 30);
+          offlineSync.saveCache('strikes', recentStrikes.value);
           
           // Re-fetch aggregates
           fetchData();
@@ -226,9 +324,48 @@ export default defineComponent({
       };
     };
 
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      deferredPrompt.value = e;
+      isInstallable.value = true;
+    };
+
+    const handleAppInstalled = () => {
+      isInstallable.value = false;
+      isStandalone.value = true;
+      showToast(
+        '🎉 App Installed!',
+        'RPi Lightning Tracker is ready on your home screen.',
+        'strike-toast',
+        '📲'
+      );
+    };
+
+    const handleOnline = () => {
+      updateNetworkStatus();
+      triggerSync();
+    };
+
+    const handleOffline = () => {
+      updateNetworkStatus();
+    };
+
     onMounted(() => {
       fetchData();
       connectWebSocket();
+
+      window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.addEventListener('appinstalled', handleAppInstalled);
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+
+      offlineSync.onSynced(() => {
+        pendingSyncCount.value = offlineSync.getQueue().length;
+      });
+
+      if (navigator.onLine && offlineSync.getQueue().length > 0) {
+        triggerSync();
+      }
       
       // Setup time updater
       const updateClock = () => {
@@ -240,6 +377,11 @@ export default defineComponent({
     });
 
     onUnmounted(() => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+
       if (reconnectTimeout) window.clearTimeout(reconnectTimeout);
       if (toastTimeout) window.clearTimeout(toastTimeout);
       if (clockInterval) window.clearInterval(clockInterval);
@@ -255,8 +397,15 @@ export default defineComponent({
       stats,
       toast,
       wsConnected,
+      isOnline,
+      pendingSyncCount,
+      isSyncing,
+      isInstallable,
+      isStandalone,
       timeStr,
-      fetchData
+      fetchData,
+      installApp,
+      triggerSync
     };
   }
 });
@@ -323,5 +472,41 @@ export default defineComponent({
 
 .toast-close:hover {
   opacity: 1;
+}
+
+.pwa-install-btn {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(2, 132, 199, 0.25));
+  border: 1px solid rgba(6, 182, 212, 0.5);
+  color: var(--color-cyan);
+  font-weight: 600;
+  margin-top: 12px;
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+.pwa-install-btn:hover {
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.4), rgba(2, 132, 199, 0.4));
+  transform: translateY(-1px);
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.4);
+}
+
+.pwa-installed-badge {
+  font-size: 0.8rem;
+  padding: 8px 12px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: var(--color-green);
+  border-radius: 8px;
+  margin-top: 12px;
+  text-align: center;
+  font-weight: 500;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(6, 182, 212, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 15px rgba(6, 182, 212, 0.5);
+  }
 }
 </style>

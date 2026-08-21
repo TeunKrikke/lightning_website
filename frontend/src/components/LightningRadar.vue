@@ -23,7 +23,7 @@
           :x1="cx" 
           :y1="cy" 
           :x2="cx" 
-          0 
+          :y2="0" 
           class="radar-sweep" 
         />
 

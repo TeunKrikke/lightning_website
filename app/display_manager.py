@@ -5,21 +5,29 @@ import threading
 import datetime
 from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy.orm import Session
-from app.config import DISPLAY_ACTIVE_START, DISPLAY_ACTIVE_END
+from app.config import DISPLAY_ACTIVE_START, DISPLAY_ACTIVE_END, DISPLAY_FONT_STYLE
 from app.database import SessionLocal, Strike, get_config_val
 from app.hardware import WaveshareDisplayWrapper
 
 logger = logging.getLogger("app.display_manager")
 
-FONT_PATH = os.path.join(
+# Setup font paths based on configuration style
+LIB_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "waveshare_lib",
-    "Font01.ttf"
+    "waveshare_lib"
 )
+
+if DISPLAY_FONT_STYLE.lower() == "serif":
+    FONT_TITLE_PATH = os.path.join(LIB_DIR, "Tinos-Bold.ttf")
+    FONT_BODY_PATH = os.path.join(LIB_DIR, "Tinos-Regular.ttf")
+else:
+    # Default to sans-serif (Arial-like)
+    FONT_TITLE_PATH = os.path.join(LIB_DIR, "LiberationSans-Bold.ttf")
+    FONT_BODY_PATH = os.path.join(LIB_DIR, "LiberationSans-Regular.ttf")
 
 class DisplayManager:
     def __init__(self):
-        self.display = WaveshareDisplayWrapper()
+        self.display = None
         self.display_initialized = False
         self.thread = None
         self.running = False
@@ -40,7 +48,8 @@ class DisplayManager:
         if self.thread:
             self.thread.join()
         try:
-            self.display.module_exit()
+            if self.display:
+                self.display.module_exit()
         except Exception as e:
             logger.error(f"Error during display exit: {e}")
         logger.info("Display manager stopped.")
@@ -52,6 +61,7 @@ class DisplayManager:
     def _display_loop(self):
         # Initialize the hardware screen
         try:
+            self.display = WaveshareDisplayWrapper()
             self.display.Init()
             self.display_initialized = True
         except Exception as e:
@@ -104,8 +114,8 @@ class DisplayManager:
 
                 # Load fonts
                 try:
-                    title_font = ImageFont.truetype(FONT_PATH, 16)
-                    body_font = ImageFont.truetype(FONT_PATH, 12)
+                    title_font = ImageFont.truetype(FONT_TITLE_PATH, 16)
+                    body_font = ImageFont.truetype(FONT_BODY_PATH, 12)
                 except Exception as font_err:
                     logger.warning(f"Could not load custom font, using default: {font_err}")
                     title_font = ImageFont.load_default()

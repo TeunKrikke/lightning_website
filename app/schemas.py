@@ -1,5 +1,5 @@
 import datetime
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from pydantic import BaseModel, Field
 
 class StrikeBase(BaseModel):
@@ -54,3 +54,41 @@ class SensorConfigUpdate(BaseModel):
 class TelegramTestRequest(BaseModel):
     token: str
     chat_id: str
+
+class DiagnosticDetails(BaseModel):
+    is_mock: bool
+    i2c_connected: bool
+    error_message: Optional[str] = None
+    
+    capacitance_read: Optional[int] = None
+    capacitance_config: int
+    capacitance_match: bool
+    
+    location_read: Optional[str] = None
+    location_config: str
+    location_match: bool
+    
+    disturber_read: Optional[str] = None
+    disturber_config: str
+    disturber_match: bool
+    
+    noise_floor_read: Optional[int] = None
+    noise_floor_config: int
+    noise_floor_match: bool
+    
+    watchdog_read: Optional[int] = None
+    watchdog_config: int
+    watchdog_match: bool
+    
+    spike_rejection_read: Optional[int] = None
+    spike_rejection_config: int
+    spike_rejection_match: bool
+
+class DiagnosticResponse(BaseModel):
+    status: str  # "healthy", "warning", "error"
+    message: str
+    details: DiagnosticDetails
+    recommendations: List[str]
+
+class ToggleMockErrorRequest(BaseModel):
+    enable_error: bool

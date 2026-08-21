@@ -13,7 +13,7 @@ TEST_DATABASE_URL = "sqlite:///:memory:"
 # I2C Address options are 0x01, 0x02, or 0x03
 I2C_ADDR = int(os.getenv("AS3935_I2C_ADDR", "3"), 16) if os.getenv("AS3935_I2C_ADDR") else 0x03
 I2C_BUS = int(os.getenv("AS3935_I2C_BUS", "1"))
-IRQ_PIN = int(os.getenv("AS3935_IRQ_PIN", "7"))  # Board mode Pin 7 (BCM 4)
+IRQ_PIN = int(os.getenv("AS3935_IRQ_PIN", "4"))  # Board mode Pin 7 (BCM 4)
 
 # Waveshare LCD Display configuration defaults
 DISPLAY_RST_PIN = int(os.getenv("DISPLAY_RST_PIN", "27"))
@@ -21,6 +21,7 @@ DISPLAY_DC_PIN = int(os.getenv("DISPLAY_DC_PIN", "25"))
 DISPLAY_BL_PIN = int(os.getenv("DISPLAY_BL_PIN", "18"))
 DISPLAY_BUS = int(os.getenv("DISPLAY_BUS", "0"))
 DISPLAY_DEVICE = int(os.getenv("DISPLAY_DEVICE", "0"))
+DISPLAY_FONT_STYLE = os.getenv("DISPLAY_FONT_STYLE", "sans")  # "sans" (Arial/LiberationSans) or "serif" (Times/Tinos)
 
 # Display active timer
 DISPLAY_ACTIVE_START = int(os.getenv("DISPLAY_ACTIVE_START", "8"))  # 08:00
