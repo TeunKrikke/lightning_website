@@ -61,6 +61,15 @@ def test_gpio_interrupt_manager():
     assert called
     assert received_channel == 12
 
+    # Test direct _gpio_callback call (as gpiozero would trigger)
+    called = False
+    manager._gpio_callback()
+    assert called
+
+    # Test cleanup
+    manager.cleanup()
+    assert manager.device is None
+
 def test_wrappers_instantiation():
     # Verify that the wrapper classes forward calls and initialize without errors
     sensor = AS3935SensorWrapper()
