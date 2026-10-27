@@ -15,7 +15,7 @@ echo "👤 Target User: ${CURRENT_USER}"
 # 1. Update and install system dependencies
 echo "📦 Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y postgresql postgresql-contrib libpq-dev python3 python3-pip python3-venv nodejs npm git unzip
+sudo apt-get install -y postgresql postgresql-contrib libpq-dev python3 python3-pip python3-venv nodejs npm git unzip python3-gpiozero python3-dev swig liblgpio-dev
 
 # 2. Configure PostgreSQL database and users
 echo "🗄️ Configuring PostgreSQL database..."
